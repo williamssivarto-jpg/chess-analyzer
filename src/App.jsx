@@ -20,58 +20,121 @@ export default function ChessAnalyzer() {
     'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔'
   };
 
-  const depthMap = {
-    easy: 15,
-    medium: 20,
-    hard: 25
+  // Piece values for evaluation
+  const pieceValues = {
+    p: 1, n: 3, b: 3, r: 5, q: 9, k: 0,
+    P: 1, N: 3, B: 3, R: 5, Q: 9, K: 0
+  };
+
+  const evaluateMove = (testGame, move) => {
+    let score = 0;
+
+    // 1. Capture value (most important)
+    const targetSquare = move.to;
+    const capturedPiece = testGame.get(targetSquare);
+    if (capturedPiece) {
+      score += pieceValues[capturedPiece.type] * 10;
+    }
+
+    // 2. Piece safety (is the moving piece under attack after the move?)
+    const movingPiece = testGame.get(move.from);
+    const moveTest = new Chess(testGame.fen());
+    moveTest.move(move, { sloppy: true });
+    
+    const movedPieceLocation = move.to;
+    const movedPieceAfter = moveTest.get(movedPieceLocation);
+    
+    // Check if piece is attacked
+    let isAttacked = false;
+    const enemyMoves = moveTest.moves({ verbose: true });
+    for (let m of enemyMoves) {
+      if (m.to === movedPieceLocation) {
+        isAttacked = true;
+        break;
+      }
+    }
+    
+    if (isAttacked && movedPieceAfter) {
+      score -= pieceValues[movedPieceAfter.type] * 5;
+    }
+
+    // 3. Board control (center squares are valuable)
+    const centerSquares = ['d4', 'e4', 'd5', 'e5', 'c3', 'c6', 'f3', 'f6'];
+    if (centerSquares.includes(move.to)) {
+      score += 3;
+    }
+
+    // 4. Pawn advancement (pawns closer to promotion are better)
+    if (movingPiece && movingPiece.type === 'p') {
+      const rank = move.to.charCodeAt(1) - '1'.charCodeAt(0);
+      score += rank * 2;
+    }
+
+    // 5. Checks are good (but not as important as captures)
+    if (moveTest.in_check()) {
+      score += 4;
+    }
+
+    return score;
+  };
+
+  const getBestMove = (testGame) => {
+    const moves = testGame.moves({ verbose: true });
+    
+    if (moves.length === 0) return null;
+
+    let bestMove = null;
+    let bestScore = -Infinity;
+    let moveScores = [];
+
+    // Evaluate all moves
+    for (let move of moves) {
+      const moveTest = new Chess(testGame.fen());
+      moveTest.move(move, { sloppy: true });
+      const score = evaluateMove(testGame, move);
+      moveScores.push({ move, score });
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMove = move;
+      }
+    }
+
+    // Difficulty: pick from top moves
+    moveScores.sort((a, b) => b.score - a.score);
+
+    let selectedMove = bestMove;
+    if (difficulty === 'easy' && moveScores.length > 2) {
+      // Easy: pick randomly from top 3
+      const topMoves = moveScores.slice(0, 3);
+      selectedMove = topMoves[Math.floor(Math.random() * topMoves.length)].move;
+    } else if (difficulty === 'medium' && moveScores.length > 1) {
+      // Medium: pick randomly from top 2
+      const topMoves = moveScores.slice(0, 2);
+      selectedMove = topMoves[Math.floor(Math.random() * topMoves.length)].move;
+    }
+    // Hard: always picks best move (selectedMove already set)
+
+    return selectedMove;
   };
 
   // Computer move logic
   useEffect(() => {
     if (game.turn() === 'b' && mode === 'play' && !isThinking) {
-      makeComputerMove();
-    }
-  }, [game, mode, isThinking]);
-
-  const makeComputerMove = async () => {
-    setIsThinking(true);
-
-    try {
-      const fen = game.fen();
-      const depth = depthMap[difficulty];
-
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ fen, depth })
-      });
-
-      if (!response.ok) {
-        console.error('API error:', response.status);
+      setTimeout(() => {
+        setIsThinking(true);
+        const bestMove = getBestMove(game);
+        
+        if (bestMove) {
+          const newGame = new Chess(game.fen());
+          newGame.move(bestMove);
+          setGame(newGame);
+        }
+        
         setIsThinking(false);
-        return;
-      }
-
-      const data = await response.json();
-      const bestMove = data.move;
-
-      if (bestMove && bestMove !== '(none)') {
-        const newGame = new Chess(fen);
-        newGame.move({
-          from: bestMove.substring(0, 2),
-          to: bestMove.substring(2, 4),
-          promotion: bestMove.length > 4 ? bestMove[4] : undefined
-        });
-        setGame(newGame);
-      }
-    } catch (error) {
-      console.error('Error:', error);
+      }, 500); // 500ms delay so it feels like thinking
     }
-
-    setIsThinking(false);
-  };
+  }, [game, mode, isThinking, difficulty]);
 
   const handleSquareClick = (square) => {
     if (isThinking || game.turn() === 'b') return;
@@ -181,7 +244,7 @@ export default function ChessAnalyzer() {
           className={`mode-btn ${mode === 'play' ? 'active' : ''}`}
           onClick={() => setMode('play')}
         >
-          Play vs Stockfish
+          Play vs Computer
         </button>
         <button
           className={`mode-btn ${mode === 'analyze' ? 'active' : ''}`}
@@ -246,7 +309,7 @@ export default function ChessAnalyzer() {
           </div>
 
           <div className="info">
-            <p>{isThinking ? 'Thinking...' : `Turn: ${game.turn() === 'w' ? 'White (You)' : 'Black (Stockfish)'}`}</p>
+            <p>{isThinking ? 'Thinking...' : `Turn: ${game.turn() === 'w' ? 'White (You)' : 'Black (Computer)'}`}</p>
             <p>FEN: {game.fen()}</p>
           </div>
         </div>
