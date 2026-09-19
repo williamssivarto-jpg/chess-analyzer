@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Chess } from 'chess.js';
 import './App.css';
 
@@ -7,6 +7,8 @@ export default function ChessAnalyzer() {
   const [game, setGame] = useState(new Chess());
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [legalMoves, setLegalMoves] = useState([]);
+  const [difficulty, setDifficulty] = useState('medium');
+  const [isThinking, setIsThinking] = useState(false);
   
   // PGN mode state
   const [pgnInput, setPgnInput] = useState('');
@@ -16,6 +18,98 @@ export default function ChessAnalyzer() {
   const pieces = {
     'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚',
     'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔'
+  };
+
+  const depthMap = {
+    easy: 15,
+    medium: 20,
+    hard: 25
+  };
+
+  // Computer move logic
+  useEffect(() => {
+    if (game.turn() === 'b' && mode === 'play' && !isThinking) {
+      makeComputerMove();
+    }
+  }, [game, mode, isThinking]);
+
+  const makeComputerMove = async () => {
+    setIsThinking(true);
+
+    try {
+      const fen = game.fen();
+      const depth = depthMap[difficulty];
+
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ fen, depth })
+      });
+
+      if (!response.ok) {
+        console.error('API error:', response.status);
+        setIsThinking(false);
+        return;
+      }
+
+      const data = await response.json();
+      const bestMove = data.move;
+
+      if (bestMove && bestMove !== '(none)') {
+        const newGame = new Chess(fen);
+        newGame.move({
+          from: bestMove.substring(0, 2),
+          to: bestMove.substring(2, 4),
+          promotion: bestMove.length > 4 ? bestMove[4] : undefined
+        });
+        setGame(newGame);
+      }
+    } catch (error) {
+      console.error('Error:', error);
+    }
+
+    setIsThinking(false);
+  };
+
+  const handleSquareClick = (square) => {
+    if (isThinking || game.turn() === 'b') return;
+
+    const piece = game.get(square);
+
+    if (selectedSquare === null) {
+      if (!piece || piece.color !== 'w') return;
+
+      setSelectedSquare(square);
+      const moves = game.moves({ square, verbose: true });
+      setLegalMoves(moves.map(m => m.to));
+    } else {
+      if (selectedSquare === square) {
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return;
+      }
+
+      const newGame = new Chess(game.fen());
+      const result = newGame.move({
+        from: selectedSquare,
+        to: square,
+        promotion: 'q'
+      });
+
+      if (result) {
+        setGame(newGame);
+        setSelectedSquare(null);
+        setLegalMoves([]);
+      }
+    }
+  };
+
+  const resetGame = () => {
+    setGame(new Chess());
+    setSelectedSquare(null);
+    setLegalMoves([]);
   };
 
   const parsePGN = (pgnText) => {
@@ -78,37 +172,6 @@ export default function ChessAnalyzer() {
     }
   };
 
-  const handleSquareClick = (square) => {
-    const piece = game.get(square);
-
-    if (selectedSquare === null) {
-      if (!piece) return;
-
-      setSelectedSquare(square);
-      const moves = game.moves({ square, verbose: true });
-      setLegalMoves(moves.map(m => m.to));
-    } else {
-      if (selectedSquare === square) {
-        setSelectedSquare(null);
-        setLegalMoves([]);
-        return;
-      }
-
-      const newGame = new Chess(game.fen());
-      const result = newGame.move({
-        from: selectedSquare,
-        to: square,
-        promotion: 'q'
-      });
-
-      if (result) {
-        setGame(newGame);
-        setSelectedSquare(null);
-        setLegalMoves([]);
-      }
-    }
-  };
-
   return (
     <div className="chess-analyzer">
       <h1>Chess Analyzer</h1>
@@ -118,7 +181,7 @@ export default function ChessAnalyzer() {
           className={`mode-btn ${mode === 'play' ? 'active' : ''}`}
           onClick={() => setMode('play')}
         >
-          Play vs Lichess
+          Play vs Stockfish
         </button>
         <button
           className={`mode-btn ${mode === 'analyze' ? 'active' : ''}`}
@@ -130,6 +193,36 @@ export default function ChessAnalyzer() {
 
       {mode === 'play' && (
         <div className="mode-content">
+          <div className="controls">
+            <div className="difficulty-selector">
+              <label>Difficulty:</label>
+              <button
+                className={`diff-btn ${difficulty === 'easy' ? 'active' : ''}`}
+                onClick={() => setDifficulty('easy')}
+                disabled={isThinking || game.turn() === 'b'}
+              >
+                Easy
+              </button>
+              <button
+                className={`diff-btn ${difficulty === 'medium' ? 'active' : ''}`}
+                onClick={() => setDifficulty('medium')}
+                disabled={isThinking || game.turn() === 'b'}
+              >
+                Medium
+              </button>
+              <button
+                className={`diff-btn ${difficulty === 'hard' ? 'active' : ''}`}
+                onClick={() => setDifficulty('hard')}
+                disabled={isThinking || game.turn() === 'b'}
+              >
+                Hard
+              </button>
+            </div>
+            <button className="reset-btn" onClick={resetGame} disabled={isThinking}>
+              New Game
+            </button>
+          </div>
+
           <div className="board">
             {Array.from({ length: 64 }).map((_, i) => {
               const file = i % 8;
@@ -151,8 +244,10 @@ export default function ChessAnalyzer() {
               );
             })}
           </div>
+
           <div className="info">
-            <p>Lichess opponent coming soon...</p>
+            <p>{isThinking ? 'Thinking...' : `Turn: ${game.turn() === 'w' ? 'White (You)' : 'Black (Stockfish)'}`}</p>
+            <p>FEN: {game.fen()}</p>
           </div>
         </div>
       )}
