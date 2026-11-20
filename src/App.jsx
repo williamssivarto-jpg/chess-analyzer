@@ -265,6 +265,13 @@ export default function App() {
   const [difficulty, setDifficulty] = useState('medium');
   const [timeControl, setTimeControl] = useState(0);
   const [soundOn, setSoundOn] = useState(true);
+  const [board, setBoard] = useState(() => {
+    try { return localStorage.getItem('chess-board') || 'walnut'; } catch { return 'walnut'; }
+  });
+  useEffect(() => {
+    document.documentElement.dataset.board = board;
+    try { localStorage.setItem('chess-board', board); } catch { /* storage can be unavailable */ }
+  }, [board]);
 
   // play state
   const gameRef = useRef(new Chess());
@@ -708,6 +715,11 @@ export default function App() {
         <button className={`nav-btn ${screen === 'analyze' ? 'active' : ''}`} onClick={() => { cancelEngine(); clearSelection(); setScreen('analyze'); }}>
           Analyse
         </button>
+        {[['walnut', 'Walnut board', '#ecd8b9', '#a97a52'], ['slate', 'Slate board', '#dfe5ec', '#7189a3']].map(([id, label, l, d]) => (
+          <button key={id} className={`nav-btn swatch ${board === id ? 'active' : ''}`} title={label} aria-label={label} aria-pressed={board === id} onClick={() => setBoard(id)}>
+            <span className="theme-swatch" aria-hidden="true"><i style={{ background: l }} /><i style={{ background: d }} /><i style={{ background: d }} /><i style={{ background: l }} /></span>
+          </button>
+        ))}
         <button className="nav-btn icon" title="Sound" onClick={() => setSoundOn(!soundOn)}>
           {soundOn ? '🔊' : '🔇'}
         </button>
