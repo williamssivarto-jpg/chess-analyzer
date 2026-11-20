@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { Chess } from 'chess.js';
 import './App.css';
+import { engineMove } from './engine';
 
 // ================= CONFIG =================
-// Your Docker Stockfish API. Change difficulty ids here if your server expects other values.
-const API_URL = 'http://localhost:3000/api/stockfish';
 const DIFFICULTIES = [
   { id: 'easy', label: 'Easy' },
   { id: 'medium', label: 'Medium' },
@@ -29,21 +28,9 @@ const colorName = (c) => (c === 'w' ? 'White' : 'Black');
 const other = (c) => (c === 'w' ? 'b' : 'w');
 
 // ================= ENGINE =================
-async function fetchEngineMove(fen, difficulty) {
-  let res;
-  try {
-    res = await fetch(API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fen, difficulty }),
-    });
-  } catch {
-    throw new Error("Can't reach Stockfish on localhost:3000. Is the Docker container running?");
-  }
-  if (!res.ok) throw new Error(`Stockfish server error (${res.status})`);
-  const data = await res.json();
-  if (!data.move) throw new Error('Stockfish returned no move');
-  return data.move;
+// Stockfish runs in the browser (see engine.js), so the app works for anyone online.
+function fetchEngineMove(fen, difficulty) {
+  return engineMove(fen, difficulty);
 }
 
 // Accepts UCI ("e2e4", "e7e8q") or SAN ("Nf3") from the server.
